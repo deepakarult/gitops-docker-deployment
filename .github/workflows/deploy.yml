@@ -1,0 +1,74 @@
+name: GitOps Docker Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+
+  build:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest
+
+
+  deploy:
+    name: Deploy to EC2
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Deploy through SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+          script: |
+
+            echo "Starting deployment..."
+
+            sudo docker pull ghcr.io/${{ github.repository }}:latest
+
+            sudo docker stop dynamic-prod-app || true
+
+            sudo docker rm dynamic-prod-app || true
+
+            sudo docker run -d \
+              -p 80:80 \
+              --name dynamic-prod-app \
+              ghcr.io/${{ github.repository }}:latest
+
+            echo "Running containers:"
+            sudo docker ps
+
+            echo "Deployment completed successfully."
